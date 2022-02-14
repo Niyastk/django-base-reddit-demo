@@ -1,15 +1,14 @@
+
 from rest_framework.exceptions import ValidationError
-from django.http import HttpResponse, request, response
+from django.http import HttpResponse
 from rest_framework import generics, permissions
-
-from .serializers import PostSerializer, VoteSerializer
-
-
+from rest_framework.views import APIView
+from .serializers import CreateUserSerializer, PostSerializer, VoteSerializer
 from .models import Post, Vote
-from rest_framework.decorators import api_view
+# from rest_framework.decorators import api_view
 from rest_framework.response import Response
-
-# Create your views here.
+from rest_framework import status
+from rest_framework.permissions import BasePermission
 
 
 def home(request):
@@ -19,19 +18,36 @@ def home(request):
 class PostList(generics.ListCreateAPIView):
     queryset = Post.objects.all()
     serializer_class = PostSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated]
 
     def perform_create(self, serializer):
-        print("helloooo", serializer.validated_data)
         serializer.save(poster=self.request.user)
 
 
-@api_view(['GET'])
-def PostDetails(request, id):
-    post = Post.objects.get(id=id)
-    serializer = PostSerializer(post)
-    print("dhfkhfkj", serializer.data)
-    return Response(serializer.data)
+# @api_view(['GET'])
+# def PostDetails(request, id):
+#     post = Post.objects.get(id=id)
+#     serializer = PostSerializer(post)
+#     return Response(serializer.data)
+
+# building custom permission(object level)
+
+class PostUserPermission(BasePermission):
+    message = "Only the author can edit this post"
+
+    def has_object_permission(self, request, view, obj):
+        print("obj :", obj)
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return obj.poster == request.user
+
+
+class PostDetails(generics.RetrieveUpdateDestroyAPIView, PostUserPermission):
+    def get_object(self):
+        return Post.objects.get(id=self.kwargs['id'])
+
+    serializer_class = PostSerializer
+    permission_classes = [PostUserPermission]  # custom made permission
 
 
 class CreateVote(generics.CreateAPIView):
@@ -49,3 +65,16 @@ class CreateVote(generics.CreateAPIView):
             raise ValidationError("You have already voted for this post :)")
         serializer.save(voter=self.request.user,
                         post=Post.objects.get(id=self.kwargs['id']))
+
+
+# creating new user
+
+class CreateNewUser(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = CreateUserSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
